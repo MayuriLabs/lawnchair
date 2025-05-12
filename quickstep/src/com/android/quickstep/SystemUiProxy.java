@@ -46,7 +46,6 @@ import android.os.RemoteException;
 import android.os.UserHandle;
 import android.util.Log;
 import android.view.IRecentsAnimationController;
-import android.view.IRecentsAnimationRunner;
 import android.view.IRemoteAnimationRunner;
 import android.view.MotionEvent;
 import android.view.RemoteAnimationAdapter;
@@ -104,6 +103,9 @@ import com.android.wm.shell.startingsurface.IStartingWindow;
 import com.android.wm.shell.startingsurface.IStartingWindowListener;
 import com.android.wm.shell.util.GroupedRecentTaskInfo;
 
+
+import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -111,6 +113,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 import app.lawnchair.compat.LawnchairQuickstepCompat;
+import app.lawnchair.compatlib.RecentsAnimationRunnerCompat;
+import app.lawnchair.compatlib.eleven.ActivityManagerCompatVR;
 
 /**
  * Holds the reference to SystemUI.
@@ -1556,24 +1560,49 @@ public class SystemUiProxy implements ISystemUiProxy, NavHandle, SafeCloseable {
             ActiveGestureLog.INSTANCE.addLog("Null mRecentTasks", RECENT_TASKS_MISSING);
             return false;
         }
-        final IRecentsAnimationRunner runner = new IRecentsAnimationRunner.Stub() {
+        final RecentsAnimationRunnerCompat runner = new RecentsAnimationRunnerCompat() {
             @Override
             public void onAnimationStart(IRecentsAnimationController controller,
-                                         RemoteAnimationTarget[] apps, RemoteAnimationTarget[] wallpapers,
-                                         Rect homeContentInsets, Rect minimizedHomeBounds, Bundle extras) {
+                                                 RemoteAnimationTarget[] apps, RemoteAnimationTarget[] wallpapers,
+                                                 Rect homeContentInsets, Rect minimizedHomeBounds) {
                 // Aidl bundles need to explicitly set class loader
                 // https://developer.android.com/guide/components/aidl#Bundles
-                if (extras != null) {
-                    extras.setClassLoader(getClass().getClassLoader());
-                }
                 listener.onAnimationStart(new RecentsAnimationControllerCompat(controller), apps,
-                        wallpapers, homeContentInsets, minimizedHomeBounds, extras);
+                        wallpapers, homeContentInsets, minimizedHomeBounds, new Bundle());
             }
 
             @Override
             public void onAnimationCanceled(int[] taskIds, TaskSnapshot[] taskSnapshots) {
                 listener.onAnimationCanceled(
                         ThumbnailData.wrap(taskIds, taskSnapshots));
+            }
+
+
+            /**
+             * compat for android 12/11/10
+             */
+            public void onAnimationCanceled(Object taskSnapshot) {
+                if (LawnchairQuickstepCompat.ATLEAST_S) {
+                    listener.onAnimationCanceled(
+                            ThumbnailData.wrap(new int[]{0}, new TaskSnapshot[]{(TaskSnapshot) taskSnapshot}));
+                } else if (LawnchairQuickstepCompat.ATLEAST_R) {
+                    ActivityManagerCompatVR compat = (ActivityManagerCompatVR) LawnchairQuickstepCompat.getActivityManagerCompat();
+                    ActivityManagerCompatVR.ThumbnailData data = compat.convertTaskSnapshotToThumbnailData(taskSnapshot);
+                    HashMap<Integer, ThumbnailData> thumbnailDatas = new HashMap<>();
+                    if (data != null) {
+                        thumbnailDatas.put(0, new ThumbnailData());
+                    }
+                    listener.onAnimationCanceled(thumbnailDatas);
+                } else {
+                    listener.onAnimationCanceled(new HashMap<>());
+                }
+            }
+
+            /**
+             * compat for android 12/11
+             */
+            public void onTaskAppeared(RemoteAnimationTarget app) {
+                listener.onTasksAppeared(new RemoteAnimationTarget[]{app});
             }
 
             @Override
